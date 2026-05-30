@@ -55,23 +55,35 @@ export default function Confetti() {
       });
     }
 
+    const startTime = Date.now();
+
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      let activeCount = 0;
+
       particles.forEach((p) => {
+        if (p.opacity <= 0) return;
+
         p.y += p.speedY;
         p.x += p.speedX;
         p.rotation += p.rotationSpeed;
+        activeCount++;
 
         // Apply a little wind fluctuation
         p.speedX += Math.sin(p.y / 30) * 0.05;
 
-        // Reset if it goes below screen
+        // Reset if it goes below screen (only if under 3 seconds elapsed)
         if (p.y > canvas.height + 20) {
-          p.y = -20;
-          p.x = Math.random() * canvas.width;
-          p.speedY = Math.random() * 5 + 4;
-          p.speedX = Math.random() * 4 - 2;
+          if (Date.now() - startTime < 3000) {
+            p.y = -20;
+            p.x = Math.random() * canvas.width;
+            p.speedY = Math.random() * 5 + 4;
+            p.speedX = Math.random() * 4 - 2;
+          } else {
+            p.opacity = 0;
+            return;
+          }
         }
 
         ctx.save();
@@ -86,7 +98,9 @@ export default function Confetti() {
         ctx.restore();
       });
 
-      animationFrameId = requestAnimationFrame(render);
+      if (activeCount > 0) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
     render();

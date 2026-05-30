@@ -108,7 +108,8 @@ export default function RoomPage() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
   /* ui */
-  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const moviesLoadedRef = useRef(false);
@@ -297,10 +298,16 @@ export default function RoomPage() {
     }
   };
 
-  const copyInvite = () => {
+  const copyCode = () => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2500);
+  };
+
+  const copyLink = () => {
     navigator.clipboard.writeText(`${window.location.origin}/room/${code}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   /* ── Loading ──────────────────────────────────────────────────────────── */
@@ -424,20 +431,36 @@ export default function RoomPage() {
                     {code}
                   </span>
                 </div>
-                <button
-                  onClick={copyInvite}
-                  className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-4 h-4" /> Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" /> Copy Invite
-                    </>
-                  )}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={copyCode}
+                    className="flex items-center gap-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    {copiedCode ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" /> Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> Copy Code
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={copyLink}
+                    className="flex items-center gap-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" /> Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> Copy Link
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Start button (host only) */}
