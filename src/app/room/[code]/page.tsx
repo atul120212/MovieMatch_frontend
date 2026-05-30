@@ -110,9 +110,12 @@ export default function RoomPage() {
   /* ui */
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const wsRef = useRef<WebSocket | null>(null);
 
-  /* ── 1. Load user from localStorage ──────────────────────────────────── */
+  const moviesLoadedRef = useRef(false);
+  const matchesLoadedRef = useRef(false);
+  const genresInitializedRef = useRef(false);
+
+  /* ── 2. Load user from localStorage ──────────────────────────────────── */
   useEffect(() => {
     const saved = localStorage.getItem(`room_${code}_user`);
     if (saved) {
@@ -125,7 +128,7 @@ export default function RoomPage() {
     setLoadingUser(false);
   }, [code]);
 
-  /* ── 2. Fetch room details ────────────────────────────────────────────── */
+  /* ── 3. Fetch room details ────────────────────────────────────────────── */
   const fetchRoom = async () => {
     try {
       const res = await fetch(`${backendUrl}/api/rooms/${code}`);
@@ -134,6 +137,7 @@ export default function RoomPage() {
       setGroupType(data.group_type);
       setRoomState(data.state as RoomState);
       setMembers(data.members);
+      setErrorMsg(""); // Clear errors on success
       
       // Initialize progress mapping from database values
       if (data.state === "swiping" || data.state === "revealed") {
@@ -150,69 +154,63 @@ export default function RoomPage() {
         setProgress(initProgress);
       }
 
-      // Initialize selected genres for this user from room details response
-      if (user) {
+      // Initialize selected genres for this user from room details response (ONLY ONCE)
+      if (user && !genresInitializedRef.current) {
         const me = data.members.find((m: any) => m.id === user.id);
         if (me && me.genres) {
           setSelectedGenres(me.genres);
+          genresInitializedRef.current = true;
         }
       }
 
-      if (data.state === "swiping") fetchDeck();
-      if (data.state === "revealed") fetchMatches();
+      if (data.state === "swiping" && !moviesLoadedRef.current) {
+        fetchDeck();
+      }
+      if (data.state === "revealed" && !matchesLoadedRef.current) {
+        fetchMatches();
+      }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to load room");
     }
   };
 
   const fetchDeck = async () => {
-    const res = await fetch(`${backendUrl}/api/rooms/${code}/recs`);
-    if (res.ok) setMovies(await res.json());
+    try {
+      const res = await fetch(`${backendUrl}/api/rooms/${code}/recs`);
+      if (res.ok) {
+        setMovies(await res.json());
+        moviesLoadedRef.current = true;
+      }
+    } catch (err) {
+      console.error("Failed to fetch deck:", err);
+    }
   };
 
   const fetchMatches = async () => {
-    const res = await fetch(`${backendUrl}/api/rooms/${code}/matches`);
-    if (res.ok) setMatches(await res.json());
+    try {
+      const res = await fetch(`${backendUrl}/api/rooms/${code}/matches`);
+      if (res.ok) {
+        setMatches(await res.json());
+        matchesLoadedRef.current = true;
+      }
+    } catch (err) {
+      console.error("Failed to fetch matches:", err);
+    }
   };
 
-  /* ── 3. WebSocket ─────────────────────────────────────────────────────── */
+  /* ── 4. Short Polling ─────────────────────────────────────────────────── */
   useEffect(() => {
     if (loadingUser || !user) return;
 
+    // Initial fetch
     fetchRoom();
 
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = backendUrl.replace(/^https?:\/\//, "");
-    const ws = new WebSocket(`${proto}://${host}/ws/${code}/${user.id}`);
-    wsRef.current = ws;
+    // Poll every 2 seconds
+    const interval = setInterval(() => {
+      fetchRoom();
+    }, 2000);
 
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.event === "participant_joined" || msg.event === "participant_left") {
-        setMembers(msg.participants);
-      } else if (msg.event === "state_changed") {
-        setRoomState(msg.state as RoomState);
-        if (msg.state === "swiping") fetchDeck();
-        if (msg.state === "revealed") {
-          if (msg.matches) setMatches(msg.matches);
-          else fetchMatches();
-        }
-      } else if (msg.event === "vote_progress") {
-        setProgress((prev) => ({
-          ...prev,
-          [msg.user_id]: {
-            name: msg.user_name,
-            voted: msg.voted_count,
-            total: msg.total_count,
-          },
-        }));
-      }
-    };
-
-    ws.onerror = () => setErrorMsg("Connection error — reload to reconnect.");
-    ws.onclose = () => console.log("WebSocket closed");
-
-    return () => ws.close();
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingUser, user]);
 

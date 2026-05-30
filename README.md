@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MovieMatch 🍿 — Next.js Frontend
 
-## Getting Started
+This is the client-side Next.js web application for MovieMatch, providing a premium, high-fidelity user interface featuring glassmorphic design, dynamic touch/keyboard gestures, real-time feedback, and high-performance rendering.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## ✨ Features
+
+- **Interactive Lobby:** Select your movie vibes (favorite genres) to customize the group recommendation pool in real-time.
+- **WebSocket Synchronization:** Instant updates showing which players have joined, their genre preferences, and live swiping progress.
+- **Premium Swipe Deck:** High-fidelity gesture-ready swiping interface with full keyboard support (`←` for Dislike, `→` for Like).
+- **Match Reveal Animations:** Visual confetti bursts and a premium card layout displaying the unanimous match or top scoring runner-ups.
+- **Robust Asset Loading:** Automatic image loading error detection that swaps in clean fallback cards if TMDB movie posters fail to render.
+
+---
+
+## 📂 Project Structure
+
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx         # Root HTML layout and Google Fonts (Outfit, Inter)
+│   │   ├── globals.css        # Core stylesheet (CSS Variables, glassmorphism)
+│   │   ├── page.tsx           # Home view: create room and guest direct join
+│   │   └── room/[code]/
+│   │       └── page.tsx       # Main room component (handles WebSocket connection & page states)
+│   └── components/
+│       ├── SwipeDeck.tsx      # Movie card swiper with keyboard events and status updates
+│       └── Confetti.tsx       # Canvas confetti renderer for matches
+├── public/                    # Static assets
+├── vercel.json                # Vercel security headers and clean URL configuration
+└── tsconfig.json              # TypeScript compilation setup
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🛠️ Getting Started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1. Install Dependencies
+Make sure you have Node.js (v18+) installed, then run:
+```bash
+npm install
+```
 
-## Learn More
+### 2. Configure Environment Variables
+Create a `.env.local` file in the `frontend/` directory:
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+```
+*(Make sure there is no trailing slash on the backend URL).*
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to view the application.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🚀 Deployment (Vercel)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The Next.js frontend is fully optimized for **Vercel**:
+1. Connect your repository to Vercel.
+2. Select `frontend` as the **Root Directory**.
+3. In **Environment Variables**, configure:
+   - `NEXT_PUBLIC_BACKEND_URL`: URL of your deployed backend (e.g., `https://moviematch-backend.onrender.com`).
+4. Click **Deploy**.
