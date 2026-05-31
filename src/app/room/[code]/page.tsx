@@ -224,6 +224,7 @@ export default function RoomPage() {
 
     // Connect to WebSocket
     let reconnectTimeout: NodeJS.Timeout;
+    let reconnectDelay = 3000;
     
     const connect = () => {
       const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -247,6 +248,7 @@ export default function RoomPage() {
 
       ws.onopen = () => {
         console.log("WebSocket connection established");
+        reconnectDelay = 3000; // Reset delay on success
       };
 
       ws.onmessage = (event) => {
@@ -291,10 +293,11 @@ export default function RoomPage() {
       };
 
       ws.onclose = (event) => {
-        console.log(`WebSocket connection closed (code: ${event.code}). Reconnecting in 3 seconds...`);
+        console.log(`WebSocket connection closed (code: ${event.code}). Reconnecting in ${reconnectDelay / 1000}s...`);
         reconnectTimeout = setTimeout(() => {
           connect();
-        }, 3000);
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // Exponential backoff up to 30s
       };
 
       ws.onerror = (err) => {
