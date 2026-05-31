@@ -85,7 +85,11 @@ export default function WatchRoomView({
       if (res.ok) {
         const data = await res.json();
         setMovieTitle(data.movie_title || "Group Watch Party");
-        setStreamUrl(data.stream_url || "");
+        const rawUrl = data.stream_url || "";
+        const fullUrl = rawUrl.startsWith("/") && !rawUrl.startsWith("http")
+          ? `${backendUrl}${rawUrl}`
+          : rawUrl;
+        setStreamUrl(fullUrl);
         setTranscodeStatus(data.transcode_status || "ready");
         setTranscodeProgress(data.transcode_progress ?? 100);
         
@@ -188,7 +192,11 @@ export default function WatchRoomView({
         switch (payload.event) {
           case "movie_status":
             if (payload.status === "ready") {
-              setStreamUrl(payload.stream_url);
+              const rawUrl = payload.stream_url;
+              const fullUrl = rawUrl && rawUrl.startsWith("/") && !rawUrl.startsWith("http")
+                ? `${backendUrl}${rawUrl}`
+                : rawUrl;
+              setStreamUrl(fullUrl);
               setTranscodeStatus("ready");
             }
             setTranscodeProgress(payload.progress);
