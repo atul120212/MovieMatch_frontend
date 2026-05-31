@@ -29,6 +29,7 @@ interface Member {
   id: string;
   name: string;
   genres?: string[];
+  notified?: boolean;
 }
 
 interface MovieCard {
@@ -217,20 +218,33 @@ export default function RoomPage() {
 
   /* ── 4. Actions ───────────────────────────────────────────────────────── */
   const startSession = async () => {
-    const res = await fetch(`${backendUrl}/api/rooms/${code}/start`, {
-      method: "POST",
-    });
-    if (!res.ok)
-      setErrorMsg((await res.json()).detail || "Could not start session");
+    try {
+      const res = await fetch(`${backendUrl}/api/rooms/${code}/start`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        throw new Error((await res.json()).detail || "Could not start session");
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Network error - failed to start session");
+    }
   };
 
   const castVote = async (tmdbId: string, choice: boolean) => {
     if (!user) return;
-    await fetch(`${backendUrl}/api/rooms/${code}/vote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user.id, tmdb_id: tmdbId, choice }),
-    });
+    try {
+      const res = await fetch(`${backendUrl}/api/rooms/${code}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, tmdb_id: tmdbId, choice }),
+      });
+      if (!res.ok) {
+        throw new Error((await res.json()).detail || "Failed to record vote");
+      }
+    } catch (err: unknown) {
+      console.error("Failed to cast vote:", err);
+      setErrorMsg(err instanceof Error ? err.message : "Network error - failed to save vote");
+    }
   };
 
   const forceReveal = async () => {
@@ -309,6 +323,29 @@ export default function RoomPage() {
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
+
+  const notifyPlayer = async (userId: string) => {
+    try {
+      const res = await fetch(`${backendUrl}/api/users/${userId}/notify`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        console.error("Failed to notify player");
+      } else {
+        fetchRoom();
+      }
+    } catch (err) {
+      console.error("Failed to notify player:", err);
+    }
+  };
+
+  const allVibesSelected =
+    members.length > 0 &&
+    members.every((m) => m.genres && m.genres.length > 0);
+
+  const meInMembers = members.find((m) => m.id === user?.id);
+  const showVibeNotification =
+    meInMembers?.notified && selectedGenres.length === 0;
 
   /* ── Loading ──────────────────────────────────────────────────────────── */
   if (loadingUser) {
@@ -402,6 +439,14 @@ export default function RoomPage() {
         </div>
       )}
 
+      {/* Vibe selection reminder notification */}
+      {showVibeNotification && (
+        <div className="bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 text-xs px-4 py-3 rounded-xl flex items-center gap-2 mb-6 animate-pulse">
+          <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span>🔔 Host is waiting for you to select your movie vibe below!</span>
+        </div>
+      )}
+
       {/* ── WAITING ────────────────────────────────────────────────────── */}
       {roomState === "waiting" && (
         <div className="flex-1 grid md:grid-cols-5 gap-8 items-start">
@@ -465,13 +510,25 @@ export default function RoomPage() {
 
               {/* Start button (host only) */}
               {user.role === "host" ? (
-                <button
-                  onClick={startSession}
-                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-4 font-bold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Play className="w-4 h-4 fill-white" />
-                  Start Swiping
-                </button>
+                <div className="w-full space-y-2">
+                  <button
+                    onClick={startSession}
+                    disabled={!allVibesSelected}
+                    className={`w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-4 font-bold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2 ${
+                      !allVibesSelected
+                        ? "opacity-50 cursor-not-allowed"
+                        : "cursor-pointer"
+                    }`}
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    Start Swiping
+                  </button>
+                  {!allVibesSelected && (
+                    <p className="text-[10px] text-zinc-500 text-center font-semibold animate-pulse">
+                      Waiting for all players to select their movie vibe...
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div className="w-full bg-zinc-900/30 border border-zinc-800 text-zinc-400 text-xs text-center py-4 rounded-2xl">
                   Waiting for the host to start…
@@ -543,7 +600,22 @@ export default function RoomPage() {
                         {m.genres && m.genres.length > 0 ? m.genres.join(", ") : "No preferences"}
                       </p>
                     </div>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    {m.genres && m.genres.length > 0 ? (
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0 select-none">
+                        <Check className="w-3.5 h-3.5" /> Ready
+                      </div>
+                    ) : user.role === "host" && !isMe ? (
+                      <button
+                        onClick={() => notifyPlayer(m.id)}
+                        className="flex items-center gap-1 text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-2 py-1 rounded-md shrink-0 transition-all cursor-pointer active:scale-95 select-none"
+                      >
+                        🔔 Notify
+                      </button>
+                    ) : (
+                      <div className="text-[10px] font-semibold text-zinc-500 italic shrink-0 select-none">
+                        Choosing...
+                      </div>
+                    )}
                   </div>
                 );
               })}
