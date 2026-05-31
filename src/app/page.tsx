@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Briefcase,
@@ -44,6 +44,34 @@ export default function Home() {
   const router = useRouter();
   const backendUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+  /* ── Intro state ──────────────────────────────────────────────────────── */
+  const [showIntro, setShowIntro] = useState(false);
+  const [introFading, setIntroFading] = useState(false);
+
+  useEffect(() => {
+    const played = sessionStorage.getItem("movieMatchIntroPlayed");
+    if (!played) {
+      setShowIntro(true);
+    }
+  }, []);
+
+  const handleIntroEnd = () => {
+    setIntroFading(true);
+    setTimeout(() => {
+      setShowIntro(false);
+      sessionStorage.setItem("movieMatchIntroPlayed", "true");
+    }, 800);
+  };
+
+  /* ── Action selection state ───────────────────────────────────────────── */
+  const [activeAction, setActiveAction] = useState<"create" | "join" | null>(null);
+
+  const handleBack = () => {
+    setActiveAction(null);
+    setCreateError("");
+    setJoinError("");
+  };
 
   /* ── Create state ─────────────────────────────────────────────────────── */
   const [hostName, setHostName] = useState("");
@@ -119,13 +147,50 @@ export default function Home() {
   /* ── Render ───────────────────────────────────────────────────────────── */
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 min-h-screen relative overflow-hidden">
+      {/* Netflix-style opening intro video */}
+      {showIntro && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black transition-opacity duration-700 ease-out ${
+            introFading ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          <video
+            src="/loaders/landingloader.mp4"
+            autoPlay
+            muted
+            playsInline
+            onEnded={handleIntroEnd}
+            className="w-full h-full object-cover md:object-contain max-w-5xl max-h-screen"
+          />
+          <button
+            onClick={handleIntroEnd}
+            className="absolute bottom-8 right-8 z-50 px-5 py-2.5 bg-zinc-900/80 hover:bg-zinc-800 text-white rounded-full text-xs font-bold uppercase tracking-wider border border-zinc-700/50 backdrop-blur transition-all active:scale-95 cursor-pointer shadow-lg"
+          >
+            Skip Intro
+          </button>
+        </div>
+      )}
+
       {/* Background glows */}
       <div className="absolute top-[10%] left-[15%] w-[40rem] h-[40rem] bg-indigo-600/10 rounded-full blur-[140px] pointer-events-none -z-10" />
       <div className="absolute bottom-[10%] right-[15%] w-[40rem] h-[40rem] bg-pink-600/10 rounded-full blur-[140px] pointer-events-none -z-10" />
 
       {/* Hero */}
-      <div className="text-center mb-10 max-w-lg">
-        <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider mb-5 animate-pulse-slow">
+      <div className="text-center mb-10 max-w-lg mx-auto">
+        {/* Brand Logo with Premium Glow */}
+        <div className="relative group mb-6 select-none block mx-auto max-w-[280px] w-full">
+          <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500/15 to-pink-500/15 rounded-full blur-xl group-hover:scale-110 transition-transform duration-700 -z-10" />
+          <img
+            src="/loaders/logo.png"
+            alt="MovieMatch Logo"
+            className="w-48 md:w-56 h-auto mx-auto object-contain transition-all duration-500 group-hover:scale-105"
+            style={{
+              filter: "drop-shadow(0 0 20px rgba(99, 102, 241, 0.45)) drop-shadow(0 0 8px rgba(219, 39, 119, 0.25))"
+            }}
+          />
+        </div>
+
+        <div className="flex items-center justify-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider mb-5 animate-pulse-slow w-fit mx-auto">
           <Sparkles className="w-3.5 h-3.5" />
           Real-time Group Swiping
         </div>
@@ -142,10 +207,67 @@ export default function Home() {
       </div>
 
       {/* Cards */}
-      <div className="grid md:grid-cols-2 gap-6 w-full max-w-4xl">
-        {/* ── Create ── */}
-        <div className="glass glass-glow rounded-2xl p-6 md:p-8">
-          <form onSubmit={handleCreate} className="space-y-5">
+      {activeAction === null ? (
+        <div className="grid md:grid-cols-2 gap-6 w-full max-w-3xl animate-fade-in">
+          {/* Card to Create Room */}
+          <button
+            onClick={() => setActiveAction("create")}
+            className="group glass glass-glow rounded-3xl p-8 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/0 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="space-y-4 relative z-10">
+              <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20 w-fit group-hover:bg-indigo-500 group-hover:text-white transition-all duration-300">
+                <Plus className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-white group-hover:text-indigo-400 transition-colors">
+                  Create Room
+                </h2>
+                <p className="text-sm text-zinc-400 leading-relaxed mt-2">
+                  Start a new session, choose group types, select preferences, and swipe movies together.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-bold text-indigo-400 mt-6 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+              Get Started &rarr;
+            </div>
+          </button>
+
+          {/* Card to Join Room */}
+          <button
+            onClick={() => setActiveAction("join")}
+            className="group glass glass-glow rounded-3xl p-8 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-pink-500/0 to-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="space-y-4 relative z-10">
+              <div className="p-3 bg-pink-500/10 text-pink-400 rounded-2xl border border-pink-500/20 w-fit group-hover:bg-pink-500 group-hover:text-white transition-all duration-300">
+                <LogIn className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-white group-hover:text-pink-400 transition-colors">
+                  Join Room
+                </h2>
+                <p className="text-sm text-zinc-400 leading-relaxed mt-2">
+                  Have a room code? Enter your friend's code to enter their lobby and select your vibe.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-bold text-pink-400 mt-6 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+              Join Session &rarr;
+            </div>
+          </button>
+        </div>
+      ) : activeAction === "create" ? (
+        /* ── Create Form Card ── */
+        <div className="glass glass-glow rounded-3xl p-8 w-full max-w-lg relative animate-fade-in">
+          <button
+            onClick={handleBack}
+            className="absolute top-4 left-4 flex items-center gap-1 text-xs text-zinc-500 hover:text-white transition-colors cursor-pointer select-none font-bold"
+          >
+            &larr; Back
+          </button>
+          
+          <form onSubmit={handleCreate} className="space-y-5 pt-4">
             <div className="flex items-center gap-3 mb-1">
               <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
                 <Plus className="w-5 h-5" />
@@ -213,16 +335,23 @@ export default function Home() {
             <button
               type="submit"
               disabled={isCreating}
-              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_20px_rgba(99,102,241,0.3)] transition-all active:scale-[0.98] cursor-pointer"
+              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all active:scale-[0.98] cursor-pointer"
             >
               {isCreating ? "Creating…" : "Create Room"}
             </button>
           </form>
         </div>
-
-        {/* ── Join ── */}
-        <div className="glass rounded-2xl p-6 md:p-8">
-          <form onSubmit={handleJoin} className="space-y-5">
+      ) : (
+        /* ── Join Form Card ── */
+        <div className="glass glass-glow rounded-3xl p-8 w-full max-w-md relative animate-fade-in">
+          <button
+            onClick={handleBack}
+            className="absolute top-4 left-4 flex items-center gap-1 text-xs text-zinc-500 hover:text-white transition-colors cursor-pointer select-none font-bold"
+          >
+            &larr; Back
+          </button>
+          
+          <form onSubmit={handleJoin} className="space-y-5 pt-4">
             <div className="flex items-center gap-3 mb-1">
               <div className="p-2.5 bg-pink-500/10 text-pink-400 rounded-xl border border-pink-500/20">
                 <LogIn className="w-5 h-5" />
@@ -271,13 +400,13 @@ export default function Home() {
             <button
               type="submit"
               disabled={isJoining}
-              className="w-full bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_20px_rgba(219,39,119,0.3)] transition-all active:scale-[0.98] cursor-pointer"
+              className="w-full bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_25px_rgba(219,39,119,0.3)] transition-all active:scale-[0.98] cursor-pointer"
             >
               {isJoining ? "Joining…" : "Join Room"}
             </button>
           </form>
         </div>
-      </div>
+      )}
 
       {/* Footer hint */}
       <p className="mt-10 text-xs text-zinc-600 flex items-center gap-1.5">

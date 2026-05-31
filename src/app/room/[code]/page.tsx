@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Confetti from "@/components/Confetti";
 import SwipeDeck from "@/components/SwipeDeck";
+import VideoLoader from "@/components/VideoLoader";
 
 /* ── Types ────────────────────────────────────────────────────────────────── */
 
@@ -350,9 +351,8 @@ export default function RoomPage() {
   /* ── Loading ──────────────────────────────────────────────────────────── */
   if (loadingUser) {
     return (
-      <div className="flex-1 min-h-screen flex flex-col items-center justify-center gap-4 text-zinc-400">
-        <RefreshCw className="w-8 h-8 animate-spin text-indigo-400" />
-        <p className="text-sm font-semibold">Loading session…</p>
+      <div className="flex-1 min-h-screen flex flex-col items-center justify-center bg-[#050508]">
+        <VideoLoader text="Loading session..." />
       </div>
     );
   }
@@ -413,10 +413,17 @@ export default function RoomPage() {
       <header className="flex justify-between items-center py-4 border-b border-zinc-800/80 mb-6">
         <button
           onClick={() => router.push("/")}
-          className="flex items-center gap-2 cursor-pointer"
+          className="flex items-center gap-2.5 cursor-pointer group"
         >
-          <Film className="w-5 h-5 text-indigo-400" />
-          <span className="font-black text-lg text-white">MovieMatch</span>
+          <img
+            src="/loaders/logo.png"
+            alt="MovieMatch Logo"
+            className="w-12 h-auto object-contain transition-all duration-300 group-hover:scale-105"
+            style={{
+              filter: "drop-shadow(0 0 6px rgba(99, 102, 241, 0.6))"
+            }}
+          />
+          <span className="font-black text-lg text-white group-hover:text-indigo-400 transition-colors">MovieMatch</span>
         </button>
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
@@ -637,11 +644,8 @@ export default function RoomPage() {
             onForceReveal={forceReveal}
           />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4">
-            <RefreshCw className="w-8 h-8 animate-spin text-indigo-400" />
-            <p className="text-sm text-zinc-400 font-semibold">
-              Generating your movie deck…
-            </p>
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <VideoLoader text="Generating your movie deck..." />
           </div>
         ))}
 
