@@ -9,6 +9,7 @@ import {
   LogIn,
   Plus,
   Sparkles,
+  Tv,
   Users,
   Users2,
 } from "lucide-react";
@@ -65,7 +66,7 @@ export default function Home() {
   };
 
   /* ── Action selection state ───────────────────────────────────────────── */
-  const [activeAction, setActiveAction] = useState<"create" | "join" | null>(null);
+  const [activeAction, setActiveAction] = useState<"create" | "join" | "stream" | null>(null);
 
   const handleBack = () => {
     setActiveAction(null);
@@ -102,6 +103,36 @@ export default function Home() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).detail || "Failed to create room");
+
+      const data = await res.json();
+      // Store session identity in localStorage
+      localStorage.setItem(
+        `room_${data.room_code}_user`,
+        JSON.stringify({ id: data.user_id, name: data.user_name, role: "host" })
+      );
+      router.push(`/room/${data.room_code}`);
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Unknown error");
+      setIsCreating(false);
+    }
+  };
+
+  const handleCreateStreamRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hostName.trim()) return setCreateError("Name is required");
+    setCreateError("");
+    setIsCreating(true);
+
+    try {
+      const res = await fetch(`${backendUrl}/api/rooms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host_name: hostName.trim(),
+          group_type: "stream",
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Failed to create stream room");
 
       const data = await res.json();
       // Store session identity in localStorage
@@ -208,11 +239,11 @@ export default function Home() {
 
       {/* Cards */}
       {activeAction === null ? (
-        <div className="grid md:grid-cols-2 gap-6 w-full max-w-3xl animate-fade-in">
+        <div className="grid md:grid-cols-3 gap-6 w-full max-w-4xl animate-fade-in">
           {/* Card to Create Room */}
           <button
             onClick={() => setActiveAction("create")}
-            className="group glass glass-glow rounded-3xl p-8 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
+            className="group glass glass-glow rounded-3xl p-6 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/0 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             <div className="space-y-4 relative z-10">
@@ -220,10 +251,10 @@ export default function Home() {
                 <Plus className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-2xl font-black text-white group-hover:text-indigo-400 transition-colors">
+                <h2 className="text-xl font-black text-white group-hover:text-indigo-400 transition-colors">
                   Create Room
                 </h2>
-                <p className="text-sm text-zinc-400 leading-relaxed mt-2">
+                <p className="text-xs text-zinc-400 leading-relaxed mt-2">
                   Start a new session, choose group types, select preferences, and swipe movies together.
                 </p>
               </div>
@@ -233,10 +264,34 @@ export default function Home() {
             </div>
           </button>
 
+          {/* Card to Create Direct Watch Party */}
+          <button
+            onClick={() => setActiveAction("stream")}
+            className="group glass glass-glow rounded-3xl p-6 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-purple-500/0 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="space-y-4 relative z-10">
+              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20 w-fit group-hover:bg-purple-500 group-hover:text-white transition-all duration-300">
+                <Tv className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-white group-hover:text-purple-400 transition-colors">
+                  Direct Stream
+                </h2>
+                <p className="text-xs text-zinc-400 leading-relaxed mt-2">
+                  Bypass movie swiping entirely. Create a room to instantly upload and stream movies with synced playback.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-bold text-purple-400 mt-6 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+              Watch Party &rarr;
+            </div>
+          </button>
+
           {/* Card to Join Room */}
           <button
             onClick={() => setActiveAction("join")}
-            className="group glass glass-glow rounded-3xl p-8 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
+            className="group glass glass-glow rounded-3xl p-6 text-left transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-pink-500/0 to-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             <div className="space-y-4 relative z-10">
@@ -244,10 +299,10 @@ export default function Home() {
                 <LogIn className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-2xl font-black text-white group-hover:text-pink-400 transition-colors">
+                <h2 className="text-xl font-black text-white group-hover:text-pink-400 transition-colors">
                   Join Room
                 </h2>
-                <p className="text-sm text-zinc-400 leading-relaxed mt-2">
+                <p className="text-xs text-zinc-400 leading-relaxed mt-2">
                   Have a room code? Enter your friend's code to enter their lobby and select your vibe.
                 </p>
               </div>
@@ -338,6 +393,56 @@ export default function Home() {
               className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all active:scale-[0.98] cursor-pointer"
             >
               {isCreating ? "Creating…" : "Create Room"}
+            </button>
+          </form>
+        </div>
+      ) : activeAction === "stream" ? (
+        /* ── Create Stream Room Form Card ── */
+        <div className="glass glass-glow rounded-3xl p-8 w-full max-w-md relative animate-fade-in">
+          <button
+            onClick={handleBack}
+            className="absolute top-4 left-4 flex items-center gap-1 text-xs text-zinc-500 hover:text-white transition-colors cursor-pointer select-none font-bold"
+          >
+            &larr; Back
+          </button>
+          
+          <form onSubmit={handleCreateStreamRoom} className="space-y-5 pt-4">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="p-2.5 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+                <Tv className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white">Direct Stream Room</h2>
+                <p className="text-xs text-zinc-500">Host a watch party directly</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="streamHostName" className="text-xs font-semibold text-zinc-300">
+                Your Name
+              </label>
+              <input
+                id="streamHostName"
+                type="text"
+                value={hostName}
+                onChange={(e) => setHostName(e.target.value)}
+                placeholder="e.g. Atul"
+                className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-purple-500/60 text-white rounded-xl px-4 py-3 text-sm outline-none transition-colors placeholder:text-zinc-600"
+              />
+            </div>
+
+            {createError && (
+              <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-2 rounded-lg">
+                {createError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={isCreating}
+              className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 disabled:opacity-50 text-white rounded-xl py-3 font-semibold text-sm shadow-[0_4px_25px_rgba(168,85,247,0.3)] transition-all active:scale-[0.98] cursor-pointer"
+            >
+              {isCreating ? "Creating Stream Room…" : "Start Watch Party"}
             </button>
           </form>
         </div>

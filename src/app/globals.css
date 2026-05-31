@@ -63,3 +63,26 @@ body {
 .animate-fade-in {
   animation: fade-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+@keyframes float-emoji {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.8);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.1);
+  }
+  90% {
+    opacity: 1;
+    transform: translateY(-120px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-160px) scale(0.8);
+  }
+}
+
+.animate-float-emoji {
+  animation: float-emoji 3s cubic-bezier(0.08, 0.82, 0.17, 1) forwards;
+}

@@ -17,6 +17,7 @@ import {
 import Confetti from "@/components/Confetti";
 import SwipeDeck from "@/components/SwipeDeck";
 import VideoLoader from "@/components/VideoLoader";
+import WatchRoomView from "@/components/WatchRoomView";
 
 /* ── Types ────────────────────────────────────────────────────────────────── */
 
@@ -63,7 +64,7 @@ interface MatchResult {
   matches: MatchMovie[];
 }
 
-type RoomState = "waiting" | "swiping" | "revealed";
+type RoomState = "waiting" | "swiping" | "revealed" | "streaming";
 
 type ProgressMap = Record<
   string,
@@ -114,9 +115,17 @@ export default function RoomPage() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
+  /* movie streaming upload state */
+  const [uploadingMovie, setUploadingMovie] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [customTitle, setCustomTitle] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
+
   const moviesLoadedRef = useRef(false);
   const matchesLoadedRef = useRef(false);
   const genresInitializedRef = useRef(false);
+  const socketRef = useRef<WebSocket | null>(null);
 
   /* ── 2. Load user from localStorage ──────────────────────────────────── */
   useEffect(() => {
@@ -201,19 +210,108 @@ export default function RoomPage() {
     }
   };
 
-  /* ── 4. Short Polling ─────────────────────────────────────────────────── */
+  /* ── 4. Short Polling & WebSocket Real-time Sync ──────────────────────── */
   useEffect(() => {
     if (loadingUser || !user) return;
 
     // Initial fetch
     fetchRoom();
 
-    // Poll every 2 seconds
+    // Poll every 2 seconds (as backup/sync fallback)
     const interval = setInterval(() => {
       fetchRoom();
     }, 2000);
 
-    return () => clearInterval(interval);
+    // Connect to WebSocket
+    let reconnectTimeout: NodeJS.Timeout;
+    
+    const connect = () => {
+      const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      
+      // Resolve host dynamically to avoid Windows localhost IPv6 ([::1]) vs IPv4 (127.0.0.1) resolution issues
+      let backendHost = backendUrl.replace(/^https?:\/\//, "");
+      if (backendHost.startsWith("localhost:")) {
+        const port = backendHost.split(":")[1] || "8000";
+        if (window.location.hostname !== "localhost" && window.location.hostname !== "") {
+          backendHost = `${window.location.hostname}:${port}`;
+        } else {
+          backendHost = `127.0.0.1:${port}`;
+        }
+      }
+      
+      const wsUrl = `${wsProto}//${backendHost}/ws/${code}/${user.id}`;
+      
+      console.log("Connecting to WebSocket:", wsUrl);
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("WebSocket connection established");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.event === "state_changed") {
+            setRoomState(data.state as RoomState);
+            if (data.state === "swiping" && !moviesLoadedRef.current) {
+              fetchDeck();
+            }
+            if (data.state === "revealed") {
+              if (data.matches) {
+                setMatches(data.matches);
+                matchesLoadedRef.current = true;
+              } else {
+                fetchMatches();
+              }
+            }
+          } else if (data.event === "participant_joined" || data.event === "participant_left") {
+            if (data.participants) {
+              const newMembers = data.participants.map((p: any) => ({
+                id: p.id,
+                name: p.name,
+                genres: p.genres,
+                notified: p.notified
+              }));
+              setMembers(newMembers);
+            }
+          } else if (data.event === "vote_progress") {
+            setProgress((prev) => ({
+              ...prev,
+              [data.user_id]: {
+                name: data.user_name,
+                voted: data.voted_count,
+                total: data.total_count,
+              },
+            }));
+          }
+        } catch (err) {
+          console.error("Error processing WebSocket message:", err);
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log(`WebSocket connection closed (code: ${event.code}). Reconnecting in 3 seconds...`);
+        reconnectTimeout = setTimeout(() => {
+          connect();
+        }, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+      };
+    };
+
+    connect();
+
+    return () => {
+      clearInterval(interval);
+      if (socketRef.current) {
+        socketRef.current.onclose = null;
+        socketRef.current.close();
+      }
+      clearTimeout(reconnectTimeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingUser, user]);
 
@@ -340,6 +438,157 @@ export default function RoomPage() {
     }
   };
 
+  const handleUploadMovie = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile || !user) return;
+    
+    const titleToUse = customTitle.trim() || (matches?.matches[0]?.title) || "Group Watch Party";
+    
+    setUploadingMovie(true);
+    setUploadProgress(0);
+    setUploadError("");
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    formData.append("title", titleToUse);
+    formData.append("host_id", user.id);
+
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${backendUrl}/api/rooms/${code}/upload`, true);
+      
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log("Upload completed successfully!");
+          setSelectedFile(null);
+          setCustomTitle("");
+          setRoomState("streaming");
+        } else {
+          try {
+            const errResponse = JSON.parse(xhr.responseText);
+            setUploadError(errResponse.detail || "Failed to upload movie.");
+          } catch {
+            setUploadError("Failed to upload movie.");
+          }
+        }
+        setUploadingMovie(false);
+      };
+
+      xhr.onerror = () => {
+        setUploadError("Network error occurred during upload.");
+        setUploadingMovie(false);
+      };
+
+      xhr.send(formData);
+    } catch (err: any) {
+      setUploadError(err.message || "Failed to initiate upload.");
+      setUploadingMovie(false);
+    }
+  };
+
+  const renderUploadForm = () => {
+    return (
+      <form onSubmit={handleUploadMovie} className="space-y-4">
+        {/* Movie Title */}
+        <div className="space-y-1.5">
+          <label htmlFor="movieTitle" className="text-xs font-semibold text-zinc-300">
+            Movie / Stream Title
+          </label>
+          <input
+            id="movieTitle"
+            type="text"
+            value={customTitle}
+            onChange={(e) => setCustomTitle(e.target.value)}
+            placeholder={matches?.matches[0]?.title || "e.g. Inception"}
+            className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-indigo-500/50 text-white rounded-xl px-4 py-3 text-sm outline-none transition-all"
+          />
+        </div>
+
+        {/* File Selector */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-zinc-300 block">
+            Select MP4 File
+          </label>
+          <div className="relative group border border-dashed border-zinc-800 hover:border-indigo-500/50 rounded-2xl p-6 text-center cursor-pointer transition-all bg-zinc-950/40">
+            <input
+              type="file"
+              accept="video/mp4"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setSelectedFile(e.target.files[0]);
+                }
+              }}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            />
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Film className="w-8 h-8 text-zinc-500 group-hover:text-indigo-400 transition-colors" />
+              {selectedFile ? (
+                <div>
+                  <p className="text-sm font-semibold text-indigo-400">{selectedFile.name}</p>
+                  <p className="text-[10px] text-zinc-500 font-medium">
+                    {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs text-zinc-400 font-medium">
+                    Click or drag & drop an MP4 video file
+                  </p>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">
+                    MP4 up to 500MB recommended
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {uploadError && (
+          <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-2 rounded-lg">
+            ⚠️ {uploadError}
+          </p>
+        )}
+
+        {/* Submit Button / Progress */}
+        {uploadingMovie ? (
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-indigo-400 animate-pulse">Uploading file to server...</span>
+              <span className="text-zinc-400">{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-zinc-900 rounded-full h-2 overflow-hidden border border-zinc-800">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-zinc-500 italic text-center animate-pulse">
+              Once uploaded, transcoding starts automatically and the stream begins.
+            </p>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={!selectedFile}
+            className={`w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-3.5 font-bold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.2)] transition-all flex items-center justify-center gap-2 ${
+              !selectedFile ? "opacity-50 cursor-not-allowed" : "cursor-pointer active:scale-[0.98]"
+            }`}
+          >
+            <Play className="w-4 h-4 fill-white" />
+            Upload & Start Co-Watching
+          </button>
+        )}
+      </form>
+    );
+  };
+
   const allVibesSelected =
     members.length > 0 &&
     members.every((m) => m.genres && m.genres.length > 0);
@@ -459,117 +708,170 @@ export default function RoomPage() {
         <div className="flex-1 grid md:grid-cols-5 gap-8 items-start">
           {/* Left: room info */}
           <div className="md:col-span-3 space-y-5">
-            <div className="glass rounded-3xl p-6 md:p-8 space-y-6">
-              <div>
-                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">
-                  Lobby
-                </span>
-                <h1 className="text-3xl font-black text-white">
-                  Room is ready!
-                </h1>
-                <p className="text-zinc-400 text-sm mt-1">
-                  Share the code or invite link. Once everyone's in, the host
-                  starts swiping.
-                </p>
-              </div>
-
-              {/* Room code */}
-              <div className="bg-zinc-950 rounded-2xl border border-zinc-900 p-4 flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block">
-                    Room Code
-                  </span>
-                  <span className="text-3xl font-black tracking-widest text-white">
-                    {code}
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={copyCode}
-                    className="flex items-center gap-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    {copiedCode ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" /> Copied!
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> Copy Code
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={copyLink}
-                    className="flex items-center gap-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    {copiedLink ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" /> Copied!
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> Copy Link
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Start button (host only) */}
-              {user.role === "host" ? (
-                <div className="w-full space-y-2">
-                  <button
-                    onClick={startSession}
-                    disabled={!allVibesSelected}
-                    className={`w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-4 font-bold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2 ${
-                      !allVibesSelected
-                        ? "opacity-50 cursor-not-allowed"
-                        : "cursor-pointer"
-                    }`}
-                  >
-                    <Play className="w-4 h-4 fill-white" />
-                    Start Swiping
-                  </button>
-                  {!allVibesSelected && (
-                    <p className="text-[10px] text-zinc-500 text-center font-semibold animate-pulse">
-                      Waiting for all players to select their movie vibe...
+            {groupType === "stream" ? (
+              user.role === "host" ? (
+                /* Co-Watch Streaming Upload Card (Direct Stream version) */
+                <div className="glass glass-glow rounded-3xl p-6 md:p-8 border border-zinc-800/80 space-y-6">
+                  <div>
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1 animate-pulse">
+                      Direct Stream Room
+                    </span>
+                    <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                      🍿 Start Watch Party
+                    </h2>
+                    <p className="text-zinc-400 text-xs mt-1">
+                      Upload an MP4 file to stream with everyone in the room! Playback is synced in real-time and cameras can be shared.
                     </p>
-                  )}
+                  </div>
+                  {renderUploadForm()}
                 </div>
               ) : (
-                <div className="w-full bg-zinc-900/30 border border-zinc-800 text-zinc-400 text-xs text-center py-4 rounded-2xl">
-                  Waiting for the host to start…
+                /* Guest view waiting for host upload */
+                <div className="glass rounded-3xl p-8 border border-zinc-800/80 text-center space-y-6 min-h-[300px] flex flex-col items-center justify-center">
+                  <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Stream is being set up</h2>
+                    <p className="text-zinc-400 text-xs mt-1">
+                      Waiting for the host to upload a movie. You will enter the Watch Room automatically once the stream starts!
+                    </p>
+                  </div>
+                  
+                  {/* Share code block for guest convenience */}
+                  <div className="bg-zinc-950 rounded-2xl border border-zinc-900 p-4 flex items-center justify-between w-full max-w-sm">
+                    <div>
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block">
+                        Room Code
+                      </span>
+                      <span className="text-xl font-black tracking-widest text-white">
+                        {code}
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={copyCode}
+                        className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer"
+                      >
+                        {copiedCode ? "Copied!" : "Copy Code"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
+              )
+            ) : (
+              <div className="glass rounded-3xl p-6 md:p-8 space-y-6">
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">
+                    Lobby
+                  </span>
+                  <h1 className="text-3xl font-black text-white">
+                    Room is ready!
+                  </h1>
+                  <p className="text-zinc-400 text-sm mt-1">
+                    Share the code or invite link. Once everyone's in, the host
+                    starts swiping.
+                  </p>
+                </div>
 
-            {/* Vibe Selection */}
-            <div className="glass rounded-3xl p-6 md:p-8 space-y-4">
-              <div>
-                <h2 className="text-lg font-bold text-white">Your Movie Vibe</h2>
-                <p className="text-zinc-400 text-xs mt-0.5">
-                  Select genres you feel like watching. We will combine everyone's choices to shape the deck!
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {AVAILABLE_GENRES.map((g) => {
-                  const selected = selectedGenres.includes(g);
-                  return (
+                {/* Room code */}
+                <div className="bg-zinc-950 rounded-2xl border border-zinc-900 p-4 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block">
+                      Room Code
+                    </span>
+                    <span className="text-3xl font-black tracking-widest text-white">
+                      {code}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
                     <button
-                      key={g}
-                      onClick={() => toggleGenre(g)}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer select-none active:scale-95 ${
-                        selected
-                          ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.15)]"
-                          : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      onClick={copyCode}
+                      className="flex items-center gap-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      {copiedCode ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" /> Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copy Code
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={copyLink}
+                      className="flex items-center gap-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      {copiedLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" /> Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copy Link
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Start button (host only) */}
+                {user.role === "host" ? (
+                  <div className="w-full space-y-2">
+                    <button
+                      onClick={startSession}
+                      disabled={!allVibesSelected}
+                      className={`w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-4 font-bold text-sm shadow-[0_4px_25px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2 ${
+                        !allVibesSelected
+                          ? "opacity-50 cursor-not-allowed"
+                          : "cursor-pointer"
                       }`}
                     >
-                      {g}
+                      <Play className="w-4 h-4 fill-white" />
+                      Start Swiping
                     </button>
-                  );
-                })}
+                    {!allVibesSelected && (
+                      <p className="text-[10px] text-zinc-500 text-center font-semibold animate-pulse">
+                        Waiting for all players to select their movie vibe...
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-full bg-zinc-900/30 border border-zinc-800 text-zinc-400 text-xs text-center py-4 rounded-2xl">
+                    Waiting for the host to start…
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+
+            {/* Vibe Selection - Only for non-streaming lobbies */}
+            {groupType !== "stream" && (
+              <div className="glass rounded-3xl p-6 md:p-8 space-y-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Your Movie Vibe</h2>
+                  <p className="text-zinc-400 text-xs mt-0.5">
+                    Select genres you feel like watching. We will combine everyone's choices to shape the deck!
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {AVAILABLE_GENRES.map((g) => {
+                    const selected = selectedGenres.includes(g);
+                    return (
+                      <button
+                        key={g}
+                        onClick={() => toggleGenre(g)}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer select-none active:scale-95 ${
+                          selected
+                            ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.15)]"
+                            : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right: member list */}
@@ -779,6 +1081,22 @@ export default function RoomPage() {
                 );
               })()}
 
+              {/* Co-Watch Streaming Upload Card */}
+              <div className="glass glass-glow rounded-3xl p-6 md:p-8 max-w-2xl mx-auto border border-zinc-800/80 space-y-6">
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1 animate-pulse">
+                    New Feature
+                  </span>
+                  <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                    🍿 Stream & Co-Watch
+                  </h2>
+                  <p className="text-zinc-400 text-xs mt-1">
+                    Upload an MP4 file to stream this movie (or any other video) with the room! Everyone's playback is synced in real-time, and you can share face reactions via camera.
+                  </p>
+                </div>
+                {renderUploadForm()}
+              </div>
+
               {/* Runner-ups */}
               {matches.matches.length > 1 && (
                 <div className="max-w-2xl mx-auto space-y-3">
@@ -873,6 +1191,20 @@ export default function RoomPage() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── STREAMING ───────────────────────────────────────────────────── */}
+      {roomState === "streaming" && (
+        <div className="flex-1 flex flex-col pb-10">
+          <WatchRoomView
+            roomCode={code}
+            userId={user.id}
+            userName={user.name}
+            isHost={user.role === "host"}
+            participants={members}
+            ws={socketRef.current}
+          />
         </div>
       )}
     </div>
