@@ -451,48 +451,116 @@ export default function RoomPage() {
     setUploadProgress(0);
     setUploadError("");
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
-    formData.append("title", titleToUse);
-    formData.append("host_id", user.id);
+    let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", `${backendUrl}/api/rooms/${code}/upload`, true);
+    if (supabaseUrl && anonKey) {
+      // Normalize URL (strip trailing slashes and /rest/v1 path suffix)
+      supabaseUrl = supabaseUrl.replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
       
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(percent);
-        }
-      };
+      // Direct upload to Supabase Storage (Bypasses Vercel payload limit)
+      const filename = `${code}_${Date.now()}_${selectedFile.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/MovieMatch/${filename}`;
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          console.log("Upload completed successfully!");
-          setSelectedFile(null);
-          setCustomTitle("");
-          setRoomState("streaming");
-        } else {
-          try {
-            const errResponse = JSON.parse(xhr.responseText);
-            setUploadError(errResponse.detail || "Failed to upload movie.");
-          } catch {
-            setUploadError("Failed to upload movie.");
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", uploadUrl, true);
+        xhr.setRequestHeader("Authorization", `Bearer ${anonKey}`);
+        xhr.setRequestHeader("apikey", anonKey);
+        
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent);
           }
-        }
-        setUploadingMovie(false);
-      };
+        };
 
-      xhr.onerror = () => {
-        setUploadError("Network error occurred during upload.");
-        setUploadingMovie(false);
-      };
+        xhr.onload = async () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const publicUrl = `${supabaseUrl}/storage/v1/object/public/MovieMatch/${filename}`;
+            
+            try {
+              const res = await fetch(`${backendUrl}/api/rooms/${code}/stream_url`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  title: titleToUse,
+                  host_id: user.id,
+                  stream_url: publicUrl
+                })
+              });
+              if (res.ok) {
+                console.log("Direct upload & registration completed successfully!");
+                setSelectedFile(null);
+                setCustomTitle("");
+                setRoomState("streaming");
+              } else {
+                setUploadError("Failed to register stream URL on backend.");
+              }
+            } catch (err: any) {
+              setUploadError("Network error registering stream URL on backend.");
+            }
+          } else {
+            setUploadError("Failed to upload video to Supabase Storage.");
+          }
+          setUploadingMovie(false);
+        };
 
-      xhr.send(formData);
-    } catch (err: any) {
-      setUploadError(err.message || "Failed to initiate upload.");
-      setUploadingMovie(false);
+        xhr.onerror = () => {
+          setUploadError("Network error occurred during direct upload.");
+          setUploadingMovie(false);
+        };
+
+        xhr.send(selectedFile);
+      } catch (err: any) {
+        setUploadError(err.message || "Failed to initiate direct upload.");
+        setUploadingMovie(false);
+      }
+    } else {
+      // Standard upload to backend (local dev fallback)
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("title", titleToUse);
+      formData.append("host_id", user.id);
+
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${backendUrl}/api/rooms/${code}/upload`, true);
+        
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log("Upload completed successfully!");
+            setSelectedFile(null);
+            setCustomTitle("");
+            setRoomState("streaming");
+          } else {
+            try {
+              const errResponse = JSON.parse(xhr.responseText);
+              setUploadError(errResponse.detail || "Failed to upload movie.");
+            } catch {
+              setUploadError("Failed to upload movie.");
+            }
+          }
+          setUploadingMovie(false);
+        };
+
+        xhr.onerror = () => {
+          setUploadError("Network error occurred during upload.");
+          setUploadingMovie(false);
+        };
+
+        xhr.send(formData);
+      } catch (err: any) {
+        setUploadError(err.message || "Failed to initiate upload.");
+        setUploadingMovie(false);
+      }
     }
   };
 
