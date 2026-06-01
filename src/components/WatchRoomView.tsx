@@ -290,6 +290,61 @@ export default function WatchRoomView({
     };
   }, [ws, isHost, isPlaying]);
 
+  // Fallback Polling Sync (Runs if WebSocket is closed or not open)
+  useEffect(() => {
+    const isWsActive = ws && ws.readyState === WebSocket.OPEN;
+    if (isWsActive) return; // WebSocket is active, no need to poll
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${backendUrl}/api/rooms/${roomCode}/watch_status`);
+        if (res.ok) {
+          const data = await res.json();
+          setMovieTitle(data.movie_title || "Group Watch Party");
+          const rawUrl = data.stream_url || "";
+          const fullUrl = rawUrl.startsWith("/") && !rawUrl.startsWith("http")
+            ? `${backendUrl}${rawUrl}`
+            : rawUrl;
+          setStreamUrl(fullUrl);
+          setTranscodeStatus(data.transcode_status || "ready");
+          setTranscodeProgress(data.transcode_progress ?? 100);
+
+          const video = videoRef.current;
+          if (video && !isHost && data.transcode_status === "ready") {
+            const targetTime = (data.position_ms || 0) / 1000;
+            const targetState = data.state || "paused";
+
+            // State sync
+            if (targetState === "playing" && video.paused) {
+              ignoreSyncEventsRef.current = true;
+              video.play().catch(() => {});
+              setIsPlaying(true);
+              setTimeout(() => { ignoreSyncEventsRef.current = false; }, 200);
+            } else if (targetState === "paused" && !video.paused) {
+              ignoreSyncEventsRef.current = true;
+              video.pause();
+              setIsPlaying(false);
+              setTimeout(() => { ignoreSyncEventsRef.current = false; }, 200);
+            }
+
+            // Position/Drift sync (sync if diff is more than 3 seconds)
+            const diff = Math.abs(video.currentTime - targetTime);
+            if (diff > 3.0) {
+              console.log(`Fallback Polling: Drift of ${diff.toFixed(2)}s detected. Seeking.`);
+              ignoreSyncEventsRef.current = true;
+              video.currentTime = targetTime;
+              setTimeout(() => { ignoreSyncEventsRef.current = false; }, 200);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("HTTP Fallback poll error:", err);
+      }
+    }, 2000); // Check every 2 seconds
+
+    return () => clearInterval(interval);
+  }, [ws, isHost, backendUrl, roomCode]);
+
   // Clean up floating emojis
   useEffect(() => {
     if (floatingEmojis.length === 0) return;
@@ -306,25 +361,45 @@ export default function WatchRoomView({
     }
   }, [chatMessages]);
 
-  // Broadcast host commands
+  // Broadcast/Sync host commands
+  const syncStateToServer = async (state: string, time: number) => {
+    if (!isHost) return;
+    
+    // 1. Send via WebSocket if open (realtime)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const eventName = state === "playing" ? "video_play" : (state === "paused" ? "video_pause" : "video_seek");
+      ws.send(JSON.stringify({ event: eventName, time }));
+    }
+    
+    // 2. Always write to HTTP backend as database backup/fallback (or primary if WS is closed)
+    try {
+      const formData = new FormData();
+      formData.append("state", state);
+      formData.append("position_ms", Math.round(time * 1000).toString());
+      
+      await fetch(`${backendUrl}/api/rooms/${roomCode}/sync`, {
+        method: "POST",
+        body: formData,
+      });
+    } catch (err) {
+      console.error("Failed to sync state to server via HTTP:", err);
+    }
+  };
+
   const onPlay = () => {
     if (!isHost || !videoRef.current) return;
     setIsPlaying(true);
     videoRef.current.play().catch((err) => {
       console.error("Host failed to play video:", err);
     });
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: "video_play", time: videoRef.current.currentTime }));
-    }
+    syncStateToServer("playing", videoRef.current.currentTime);
   };
 
   const onPause = () => {
     if (!isHost || !videoRef.current) return;
     setIsPlaying(false);
     videoRef.current.pause();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: "video_pause", time: videoRef.current.currentTime }));
-    }
+    syncStateToServer("paused", videoRef.current.currentTime);
   };
 
   const onSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -332,26 +407,20 @@ export default function WatchRoomView({
     const time = parseFloat(e.target.value);
     videoRef.current.currentTime = time;
     setCurrentTime(time);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: "video_seek", time }));
-    }
+    syncStateToServer(isPlaying ? "playing" : "paused", time);
   };
 
   // Host heartbeat synchronization
   useEffect(() => {
     if (!isHost || !isPlaying) return;
     const interval = setInterval(() => {
-      if (videoRef.current && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({
-            event: "video_heartbeat",
-            time: videoRef.current.currentTime,
-          })
-        );
+      if (videoRef.current) {
+        syncStateToServer("playing", videoRef.current.currentTime);
       }
-    }, 5000);
+    }, 4000); // Send heartbeat every 4 seconds
     return () => clearInterval(interval);
   }, [isHost, isPlaying, ws]);
+
 
   // Player handlers
   const handleTimeUpdate = () => {
