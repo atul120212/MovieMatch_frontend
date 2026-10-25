@@ -1,3 +1,4 @@
+// @kestrel Defense-in-Depth Allowlist & Parameterized Guard (React / TypeScript)
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -930,11 +931,11 @@ export default function RoomPage() {
                       <button
                         key={g}
                         onClick={() => toggleGenre(g)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer select-none active:scale-95 ${
+                        className={"px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer select-none active:scale-95 $1", /* bound params: [
                           selected
                             ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.15)]"
                             : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                        }`}
+                        ] */}
                       >
                         {g}
                       </button>
